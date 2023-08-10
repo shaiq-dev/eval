@@ -27,5 +27,5 @@ eval("1+1", .option_1=value_1, .option_2=value_2 ...)
 ```
 
 ```c
-.log    [bool]  [false]
+.log    [bool]  [false] - Enables logging
 ```
