@@ -4,6 +4,7 @@
 #include "parser.h"
 #include <math.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <time.h>
 
 #ifdef __cplusplus
@@ -48,16 +49,19 @@ extern "C"
     }
 
     static inline double
-    eval_(ExpressionNode *expr, EvalOptions options[static 1])
+    eval_(char *expr, EvalOptions options[static 1])
     {
         clock_t start, end;
+
         if (options->log)
         {
             start = clock();
             printf("[eval()] evalvation for %s\n", expr);
         }
 
-        double ans = eval_expression(expr);
+        Parser *parser            = parser_init(expr);
+        ExpressionNode *expr_tree = parser_parse_expression(parser, PREC_MIN);
+        double ans                = eval_expression(expr_tree);
 
         if (options->log)
         {
