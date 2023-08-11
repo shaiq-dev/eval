@@ -12,15 +12,15 @@ main(int argc, char *argv[])
     double ans;
     
     // Expressions
-    ans = eval("1+1*4");    // 5
-    ans = eval("10+1*0");   // 10
+    ans = eval("1+1*4");                // 5
+    ans = eval("10+1*0");               // 10
 
     // Expressions with Parentheses
-    ans = eval("1+1(5*2)");    // 11
-    ans = eval("3+(5*2)");     // 13
+    ans = eval("1+1(5*2)");             // 11
+    ans = eval("3+(5*2)");              // 13
 
     // Erros
-    ans = eval("2/0");      // Error
+    ans = eval("2/0");                  // eval() ZeroDivisionError: division by zero
 }
 
 ```
