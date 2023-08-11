@@ -1,10 +1,4 @@
 {
     "editor.formatOnSave": true,
     "clang-format.executable": "/opt/homebrew/bin/clang-format",
-    "files.associations": {
-        "parser.h": "c",
-        "__config": "c",
-        "__nullptr": "c",
-        "eval.h": "c"
-    },
 }
