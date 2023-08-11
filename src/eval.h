@@ -34,7 +34,14 @@ _memory(void *ptr, size_t size, size_t new_size)
     {                                                                          \
         fprintf(stdout, "[DEBUG] ");                                           \
         fprintf(stdout, __VA_ARGS__);                                          \
-        fprintf(stdout, "\n");                                                 \
+    }
+
+// Error Handling
+#define ERROR(...)                                                             \
+    {                                                                          \
+        fprintf(stderr, "eval() ");                                            \
+        fprintf(stderr, __VA_ARGS__);                                          \
+        exit(1);                                                               \
     }
 
 // Lexer
@@ -319,7 +326,15 @@ solve(ExpressionNode *expr)
     case NODE_MUL:
         return solve(expr->binary.left) * solve(expr->binary.right);
     case NODE_DIV:
-        return solve(expr->binary.left) / solve(expr->binary.right);
+    {
+        double nr = solve(expr->binary.left);
+        double dr = solve(expr->binary.right);
+
+        if (fabs(dr) < 10e-7) ERROR("ZeroDivisionError: division by zero\n");
+
+        return nr / dr;
+    }
+
     case NODE_POW:
         return pow(solve(expr->binary.left), solve(expr->binary.right));
     }
