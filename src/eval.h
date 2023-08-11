@@ -345,6 +345,10 @@ eval(char *expr)
     ExpressionNode *expr_tree = parse_expr(p, PREC_MIN);
     double ans                = solve(expr_tree);
 
+    // Free Memory
+    MEM_FREE(Lexer, l);
+    MEM_FREE(Parser, p);
+
     return ans;
 }
 
