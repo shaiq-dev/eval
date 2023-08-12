@@ -21,6 +21,11 @@ main(int argc, char *argv[])
 
     // Erros
     ans = eval("2/0");                  // eval() ZeroDivisionError: division by zero
+    
+    ans = eval("1+2/(3 * a)")
+    //  "1+2/(3 * a)"
+    //            ^
+    // SyntaxError: unsupported operand           
 }
 
 ```
