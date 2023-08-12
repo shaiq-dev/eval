@@ -20,7 +20,7 @@ main(int argc, char *argv[])
     ans = eval("3+(5*2)");              // 13
 
     // Erros
-    ans = eval("2/0");                  // eval() ZeroDivisionError: division by zero
+    ans = eval("2/0");                  // ZeroDivisionError: division by zero
     
     ans = eval("1+2/(3 * a)")
     //  "1+2/(3 * a)"
