@@ -39,7 +39,6 @@ _memory(void *ptr, size_t size, size_t new_size)
 // Error Handling
 #define ERROR(...)                                                             \
     {                                                                          \
-        fprintf(stderr, "eval() ");                                            \
         fprintf(stderr, __VA_ARGS__);                                          \
         exit(1);                                                               \
     }
@@ -70,6 +69,7 @@ typedef struct Lexer
 {
     char *start;
     char *current;
+    unsigned int pos;
 } Lexer;
 
 #define LEXER_PEEK() *l->current
@@ -91,9 +91,12 @@ make_token(Lexer *l, TokenType type)
         }
     }
 
-    return (Token){.type   = type,
-                   .value  = (char *)l->start,
-                   .length = (unsigned int)(l->current - l->start)};
+    // set the current position
+    unsigned int token_length = (unsigned int)(l->current - l->start);
+    l->pos += token_length;
+
+    return (Token){
+        .type = type, .value = (char *)l->start, .length = token_length};
 }
 
 static inline Token
@@ -103,7 +106,7 @@ lexer_next_token(Lexer *l)
     while (IS_WHITESPACE(LEXER_PEEK())) LEXER_ADVANCE();
     l->start = l->current;
 
-    if (*l->current == '\0') return make_token(l, TOKEN_ERROR);
+    if (*l->current == '\0') return make_token(l, TOKEN_EOF);
 
     char c = LEXER_ADVANCE();
 
@@ -176,9 +179,8 @@ typedef struct Parser
 {
     Token current;
     Lexer *lexer;
+    char *expr;
 } Parser;
-
-#define PARSER_ADVANCE() p->current = lexer_next_token(p->lexer)
 
 static Precedence precedence[] = {
     [TOKEN_PLUS] = PREC_TERM, [TOKEN_MINUS] = PREC_TERM,
@@ -188,6 +190,19 @@ static Precedence precedence[] = {
 
 static inline ExpressionNode *parse_expr(Parser *p,
                                          Precedence curr_operator_prec);
+
+static inline void
+parser_check_error(Parser *p)
+{
+    if (p->current.type == TOKEN_ERROR)
+    {
+        ERROR("\t\"%s\"\n\t%*c\nSyntaxError: unsupported operand\n", p->expr,
+              p->lexer->pos + 1, '^');
+    }
+}
+
+#define PARSER_ADVANCE()                                                       \
+    (p->current = lexer_next_token(p->lexer), parser_check_error(p))
 
 static inline ExpressionNode *
 parse_number(Parser *p)
@@ -349,8 +364,10 @@ eval(char *expr)
     Lexer *l   = MEM_ALLOC(Lexer, 1);
     l->start   = expr;
     l->current = expr;
+    l->pos     = 0;
 
     Parser *p  = MEM_ALLOC(Parser, 1);
+    p->expr    = expr;
     p->current = (Token){0};
     p->lexer   = l;
 
