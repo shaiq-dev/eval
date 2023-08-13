@@ -1,4 +1,4 @@
-## Fast and efficient math expression evalvator in C
+## Fast and efficient math expression evaluator in C
 
 It's a simple `eval()` functions that can evaluate mathematical expressions really fast. 
 
