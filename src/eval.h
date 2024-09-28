@@ -9,349 +9,392 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Memory
+/**
+ * If `new_size` is zero or less, the memory pointed to by `ptr` is freed.
+ * Otherwise, `realloc` is used to resize the memory block.
+ */
 static inline void *
-_memory(void *ptr, size_t size, size_t new_size)
+__mem(void *pt, size_t size, size_t new_size)
 {
     if (new_size <= 0)
     {
-        free(ptr);
+        free(pt);
         return (void *)0;
     }
-    void *m = realloc(ptr, new_size);
+
+    void *m = realloc(pt, new_size);
+
     if (m == (void *)0) exit(1);
 
     return m;
 }
 
-#define MEM_ALLOC(T, count) (T *)_memory((void *)0, 0, count * sizeof(T))
-#define MEM_FREE(T, ptr) (T *)_memory((ptr), sizeof(T), 0)
+#define mem_alloc(T, c) (T *)__mem((void *)0, 0, c * sizeof(T))
+#define mem_free(T, pt) (T *)__mem((pt), sizeof(T), 0)
 
-// Debug
-#define DEBUG true
-#define dbg(...)                                                               \
-    if (DEBUG)                                                                 \
-    {                                                                          \
-        fprintf(stdout, "[DEBUG] ");                                           \
-        fprintf(stdout, __VA_ARGS__);                                          \
-    }
-
-// Error Handling
-#define ERROR(...)                                                             \
+#define die(...)                                                               \
     {                                                                          \
         fprintf(stderr, __VA_ARGS__);                                          \
         exit(1);                                                               \
     }
 
-// Lexer
+/**
+ * Token types for lexical analysis
+ */
 typedef enum
 {
-    TOKEN_ERROR,
-    TOKEN_EOF,
-    TOKEN_NUMBER,
-    TOKEN_PLUS,
-    TOKEN_MINUS,
-    TOKEN_STAR,
-    TOKEN_SLASH,
-    TOKEN_CARET,
-    TOKEN_LEFT_PAREN,
-    TOKEN_RIGHT_PAREN,
+    TK_ERROR,       // Invalid or unrecognized token
+    TK_EOF,         // End of input
+    TK_NUMBER,      // Numeric literal
+    TK_PLUS,        // '+' operator
+    TK_MINUS,       // '-' operator
+    TK_STAR,        // '*' operator
+    TK_SLASH,       // '/' operator
+    TK_CARET,       // '^' operator (exponentiation)
+    TK_LEFT_PAREN,  //'(' left parenthesis
+    TK_RIGHT_PAREN, // ')' right parenthesis
 } TokenType;
 
-typedef struct Token
+typedef struct __token
 {
     TokenType type;
     char *value;
-    unsigned int length;
+    unsigned int len;
 } Token;
 
-typedef struct Lexer
+typedef struct __lexer
 {
     char *start;
-    char *current;
+    char *cur;
     unsigned int pos;
 } Lexer;
 
-#define LEXER_PEEK() *l->current
-#define LEXER_ADVANCE() (l->current++, l->current[-1])
-#define IS_WHITESPACE(c) (c == ' ' || c == '\r' || c == '\n' || c == '\t')
-#define IS_DIGIT(c) (c >= '0' && c <= '9')
+#define lex_peek() *lex->cur                  // Peek the current character
+#define lex_advn() (lex->cur++, lex->cur[-1]) // Advance to the next character
+#define lex_peek() *lex->cur                  // Check for whitespace
+
+#define _is_digit(c) (c >= '0' && c <= '9')
+#define _is_space(c) (c == ' ' || c == '\r' || c == '\n' || c == '\t')
 
 static inline Token
-make_token(Lexer *l, TokenType type)
+lex_make_token(Lexer *lex, TokenType type)
 {
-    if (type == TOKEN_NUMBER)
+    if (type == TK_NUMBER)
     {
-        while (IS_DIGIT(LEXER_PEEK())) LEXER_ADVANCE();
-
-        if (LEXER_PEEK() == '.')
+        while (_is_digit(lex_peek()))
         {
-            LEXER_ADVANCE();
-            while (IS_DIGIT(LEXER_PEEK())) LEXER_ADVANCE();
+            lex_advn();
+        }
+
+        // Handle floating point numbers
+        if (lex_peek() == '.')
+        {
+            lex_advn();
+
+            while (_is_digit(lex_peek()))
+            {
+                lex_advn();
+            }
         }
     }
 
-    // set the current position
-    unsigned int token_length = (unsigned int)(l->current - l->start);
-    l->pos += token_length;
+    // Update position
+    unsigned int len = (unsigned int)(lex->cur - lex->start);
+    lex->pos += len;
 
     return (Token){
-        .type = type, .value = (char *)l->start, .length = token_length};
+        .type  = type,
+        .value = (char *)lex->start,
+        .len   = len,
+    };
 }
 
 static inline Token
-lexer_next_token(Lexer *l)
+lex_next_token(Lexer *lex)
 {
     // Skip whitespaces
-    while (IS_WHITESPACE(LEXER_PEEK())) LEXER_ADVANCE();
-    l->start = l->current;
+    while (_is_space(lex_peek()))
+    {
+        lex_advn();
+    }
 
-    if (*l->current == '\0') return make_token(l, TOKEN_EOF);
+    lex->start = lex->cur;
 
-    char c = LEXER_ADVANCE();
+    if (*lex->cur == '\0')
+    {
+        return lex_make_token(lex, TK_EOF);
+    }
 
-    if (IS_DIGIT(c)) return make_token(l, TOKEN_NUMBER);
+    char c = lex_advn();
+
+    if (_is_digit(c))
+    {
+        return lex_make_token(lex, TK_NUMBER);
+    }
 
     switch (c)
     {
     case '(':
-        return make_token(l, TOKEN_LEFT_PAREN);
+        return lex_make_token(lex, TK_LEFT_PAREN);
     case ')':
-        return make_token(l, TOKEN_RIGHT_PAREN);
+        return lex_make_token(lex, TK_RIGHT_PAREN);
     case '+':
-        return make_token(l, TOKEN_PLUS);
+        return lex_make_token(lex, TK_PLUS);
     case '-':
-        return make_token(l, TOKEN_MINUS);
+        return lex_make_token(lex, TK_MINUS);
     case '*':
-        return make_token(l, TOKEN_STAR);
+        return lex_make_token(lex, TK_STAR);
     case '/':
-        return make_token(l, TOKEN_SLASH);
+        return lex_make_token(lex, TK_SLASH);
     case '^':
-        return make_token(l, TOKEN_CARET);
+        return lex_make_token(lex, TK_CARET);
     }
 
-    return make_token(l, TOKEN_ERROR);
+    // Unrecognized character
+    return lex_make_token(lex, TK_ERROR);
 }
 
-// Parser
 typedef enum
 {
-    NODE_ERROR,
-    NODE_NUMBER,
-    NODE_POSITIVE,
-    NODE_NEGATIVE,
-    NODE_ADD,
-    NODE_SUB,
-    NODE_MUL,
-    NODE_DIV,
-    NODE_POW
+    ND_ERROR,
+    ND_NUMBER,
+    ND_POSITIVE,
+    ND_NEGATIVE,
+    ND_ADD,
+    ND_SUB,
+    ND_MUL,
+    ND_DIV,
+    ND_POW
 } NodeType;
 
+/**
+ * Precedence levels for different operators.
+ */
 typedef enum
 {
-    PREC_MIN,
-    PREC_TERM,
-    PREC_MUL,
-    PREC_DIV,
-    PREC_POW,
+    PREC_MIN,  // Lowest precedence (used for initial parsing)
+    PREC_TERM, // Precedence for '+' and '-'
+    PREC_MUL,  // Precedence for '*'
+    PREC_DIV,  // Precedence for '/'
+    PREC_POW,  // Precedence for '^'
 } Precedence;
 
-typedef struct ExpressionNode
+// Operator precedence table
+static Precedence precedence[] = {
+    [TK_PLUS] = PREC_TERM, [TK_MINUS] = PREC_TERM, [TK_STAR] = PREC_MUL,
+    [TK_SLASH] = PREC_DIV, [TK_CARET] = PREC_POW,
+};
+
+/**
+ * Represents a node in the abstract syntax tree (AST). Each node can be a
+ * number, a unary operation (positive/negative), or a binary operation
+ * (addition, subtraction, etc.).
+ */
+typedef struct __expression_node
 {
     NodeType type;
 
     union
     {
         double number;
+
         struct
         {
-            struct ExpressionNode *operand;
+            struct __expression_node *operand;
         } unary;
+
         struct
         {
-            struct ExpressionNode *left;
-            struct ExpressionNode *right;
+            struct __expression_node *left;
+            struct __expression_node *right;
         } binary;
     };
 } ExpressionNode;
 
-typedef struct Parser
+typedef struct __parser
 {
-    Token current;
-    Lexer *lexer;
+    Token cur;
+    Lexer *lex;
     char *expr;
 } Parser;
 
-static Precedence precedence[] = {
-    [TOKEN_PLUS] = PREC_TERM, [TOKEN_MINUS] = PREC_TERM,
-    [TOKEN_STAR] = PREC_MUL,  [TOKEN_SLASH] = PREC_DIV,
-    [TOKEN_CARET] = PREC_POW,
-};
-
-static inline ExpressionNode *parse_expr(Parser *p,
-                                         Precedence curr_operator_prec);
+static inline ExpressionNode *parser_parse_expr(Parser *p,
+                                                Precedence curr_operator_prec);
 
 static inline void
 parser_check_error(Parser *p)
 {
-    if (p->current.type == TOKEN_ERROR)
-    {
-        ERROR("\t\"%s\"\n\t%*c\nSyntaxError: unsupported operand\n", p->expr,
-              p->lexer->pos + 1, '^');
-    }
+    if (p->cur.type == TK_ERROR)
+        die("\t\"%s\"\n\t%*c\neval: unsupported operand\n", p->expr,
+            p->lex->pos + 1, '^');
 }
 
-#define PARSER_ADVANCE()                                                       \
-    (p->current = lexer_next_token(p->lexer), parser_check_error(p))
+#define parser_advn() (p->cur = lex_next_token(p->lex), parser_check_error(p))
 
 static inline ExpressionNode *
-parse_number(Parser *p)
+parser_parse_number(Parser *p)
 {
-    double value = strtod(p->current.value, (void *)0);
-    PARSER_ADVANCE();
+    double value = strtod(p->cur.value, NULL);
+    parser_advn();
 
-    ExpressionNode *ret = MEM_ALLOC(ExpressionNode, 1);
-    ret->type           = NODE_NUMBER;
+    ExpressionNode *ret = mem_alloc(struct __expression_node, 1);
+    ret->type           = ND_NUMBER;
     ret->number         = value;
+
     return ret;
 }
 
+/**
+ * Parses prefix expressions (numbers, parentheses, unary operators).
+ * Handles numbers, expressions within parentheses, and unary plus/minus.
+ * Also handles implicit multiplication (e.g., `2(3)` as `2 * 3`).
+ */
 static inline ExpressionNode *
-parse_prefix_expr(Parser *p)
+parser_parse_prefix_expr(Parser *p)
 {
-    ExpressionNode *ret = (void *)0;
+    ExpressionNode *ret = NULL;
 
-    switch (p->current.type)
+    switch (p->cur.type)
     {
-    case TOKEN_NUMBER:
-        ret = parse_number(p);
+    case TK_NUMBER:
+        ret = parser_parse_number(p);
         break;
 
-    case TOKEN_LEFT_PAREN:
+    case TK_LEFT_PAREN:
     {
-        PARSER_ADVANCE();
-        ret = parse_expr(p, PREC_MIN);
-        if (p->current.type == TOKEN_RIGHT_PAREN) PARSER_ADVANCE();
+        parser_advn();
+        ret = parser_parse_expr(p, PREC_MIN);
+        if (p->cur.type == TK_RIGHT_PAREN) parser_advn();
     }
     break;
 
-    case TOKEN_PLUS:
+    case TK_PLUS:
     {
-        PARSER_ADVANCE();
-        ret                = MEM_ALLOC(ExpressionNode, 1);
-        ret->type          = NODE_POSITIVE;
-        ret->unary.operand = parse_prefix_expr(p);
+        parser_advn();
+        ret                = mem_alloc(ExpressionNode, 1);
+        ret->type          = ND_POSITIVE;
+        ret->unary.operand = parser_parse_prefix_expr(p);
     }
     break;
 
-    case TOKEN_MINUS:
+    case TK_MINUS:
     {
-        PARSER_ADVANCE();
-        ret                = MEM_ALLOC(ExpressionNode, 1);
-        ret->type          = NODE_NEGATIVE;
-        ret->unary.operand = parse_prefix_expr(p);
+        parser_advn();
+        ret                = mem_alloc(ExpressionNode, 1);
+        ret->type          = ND_NEGATIVE;
+        ret->unary.operand = parser_parse_prefix_expr(p);
     }
     break;
     }
 
     if (!ret)
     {
-        ret       = MEM_ALLOC(ExpressionNode, 1);
-        ret->type = NODE_ERROR;
+        ret       = mem_alloc(ExpressionNode, 1);
+        ret->type = ND_ERROR;
     }
 
-    if (p->current.type == TOKEN_NUMBER || p->current.type == TOKEN_LEFT_PAREN)
+    // Handle implicit multiplication (e.g., `2(3)` or `(2)(3)`)
+    if (p->cur.type == TK_NUMBER || p->cur.type == TK_LEFT_PAREN)
     {
-        ExpressionNode *new_ret = MEM_ALLOC(ExpressionNode, 1);
-        new_ret->type           = NODE_MUL;
+        ExpressionNode *new_ret = mem_alloc(ExpressionNode, 1);
+        new_ret->type           = ND_MUL;
         new_ret->binary.left    = ret;
-        new_ret->binary.right   = parse_expr(p, PREC_DIV);
+        new_ret->binary.right   = parser_parse_expr(p, PREC_DIV);
         ret                     = new_ret;
     }
 
     return ret;
 }
 
+/**
+ * Parses infix expressions based on the operator.
+ * Creates a binary operation node and recursively parses the right-hand side
+ * expression with the appropriate precedence.
+ */
 static inline ExpressionNode *
-parse_infix_expr(Parser *p, Token operator, ExpressionNode * left)
+parser_parse_infix_expr(Parser *p, Token op, ExpressionNode *left)
 {
-    ExpressionNode *ret = MEM_ALLOC(ExpressionNode, 1);
+    ExpressionNode *ret = mem_alloc(ExpressionNode, 1);
 
-    switch (operator.type)
+    switch (op.type)
     {
-    case TOKEN_PLUS:
-        ret->type = NODE_ADD;
+    case TK_PLUS:
+        ret->type = ND_ADD;
         break;
-    case TOKEN_MINUS:
-        ret->type = NODE_SUB;
+    case TK_MINUS:
+        ret->type = ND_SUB;
         break;
-    case TOKEN_STAR:
-        ret->type = NODE_MUL;
+    case TK_STAR:
+        ret->type = ND_MUL;
         break;
-    case TOKEN_SLASH:
-        ret->type = NODE_DIV;
+    case TK_SLASH:
+        ret->type = ND_DIV;
         break;
-    case TOKEN_CARET:
-        ret->type = NODE_POW;
+    case TK_CARET:
+        ret->type = ND_POW;
         break;
     }
 
     ret->binary.left  = left;
-    ret->binary.right = parse_expr(p, precedence[operator.type]);
+    ret->binary.right = parser_parse_expr(p, precedence[op.type]);
     return ret;
 }
 
+/**
+ * Parses an expression based on operator precedence.
+ * Implements a recursive descent parser with operator precedence handling.
+ */
 static inline ExpressionNode *
-parse_expr(Parser *p, Precedence curr_operator_prec)
+parser_parse_expr(Parser *p, Precedence curr_operator_prec)
 {
-    ExpressionNode *left          = parse_prefix_expr(p);
-    Token next_operator           = p->current;
-    Precedence next_operator_prec = precedence[p->current.type];
+    ExpressionNode *left          = parser_parse_prefix_expr(p);
+    Token next_operator           = p->cur;
+    Precedence next_operator_prec = precedence[p->cur.type];
 
+    // Continue parsing while the next operator has higher precedence
     while (next_operator_prec != PREC_MIN)
     {
 
         if (curr_operator_prec >= next_operator_prec) break;
 
-        PARSER_ADVANCE();
-        left               = parse_infix_expr(p, next_operator, left);
-        next_operator      = p->current;
-        next_operator_prec = precedence[p->current.type];
+        parser_advn();
+        left               = parser_parse_infix_expr(p, next_operator, left);
+        next_operator      = p->cur;
+        next_operator_prec = precedence[p->cur.type];
     }
 
     return left;
 }
 
-// Evaluator
 static inline double
-solve(ExpressionNode *expr)
+__eval(ExpressionNode *expr)
 {
     switch (expr->type)
     {
-    case NODE_NUMBER:
+    case ND_NUMBER:
         return expr->number;
-    case NODE_POSITIVE:
-        return +solve(expr->unary.operand);
-    case NODE_NEGATIVE:
-        return -solve(expr->unary.operand);
-    case NODE_ADD:
-        return solve(expr->binary.left) + solve(expr->binary.right);
-    case NODE_SUB:
-        return solve(expr->binary.left) - solve(expr->binary.right);
-    case NODE_MUL:
-        return solve(expr->binary.left) * solve(expr->binary.right);
-    case NODE_DIV:
+    case ND_POSITIVE:
+        return +__eval(expr->unary.operand);
+    case ND_NEGATIVE:
+        return -__eval(expr->unary.operand);
+    case ND_ADD:
+        return __eval(expr->binary.left) + __eval(expr->binary.right);
+    case ND_SUB:
+        return __eval(expr->binary.left) - __eval(expr->binary.right);
+    case ND_MUL:
+        return __eval(expr->binary.left) * __eval(expr->binary.right);
+    case ND_DIV:
     {
-        double nr = solve(expr->binary.left);
-        double dr = solve(expr->binary.right);
+        double nr = __eval(expr->binary.left);
+        double dr = __eval(expr->binary.right);
 
-        if (fabs(dr) < 10e-7) ERROR("ZeroDivisionError: division by zero\n");
+        if (fabs(dr) < 10e-7) die("eval: division by zero\n");
 
         return nr / dr;
     }
 
-    case NODE_POW:
-        return pow(solve(expr->binary.left), solve(expr->binary.right));
+    case ND_POW:
+        return pow(__eval(expr->binary.left), __eval(expr->binary.right));
     }
 
     return 0;
@@ -361,27 +404,27 @@ double
 eval(char *expr)
 {
 
-    Lexer *l   = MEM_ALLOC(Lexer, 1);
-    l->start   = expr;
-    l->current = expr;
-    l->pos     = 0;
+    Lexer *l = mem_alloc(Lexer, 1);
+    l->start = expr;
+    l->cur   = expr;
+    l->pos   = 0;
 
-    Parser *p  = MEM_ALLOC(Parser, 1);
-    p->expr    = expr;
-    p->current = (Token){0};
-    p->lexer   = l;
+    Parser *p = mem_alloc(Parser, 1);
+    p->expr   = expr;
+    p->cur    = (Token){0};
+    p->lex    = l;
 
     // Get the first token
-    PARSER_ADVANCE();
+    parser_advn();
 
-    ExpressionNode *expr_tree = parse_expr(p, PREC_MIN);
-    double ans                = solve(expr_tree);
+    ExpressionNode *expr_tree = parser_parse_expr(p, PREC_MIN);
+    double ans                = __eval(expr_tree);
 
     // Free Memory
-    MEM_FREE(Lexer, l);
-    MEM_FREE(Parser, p);
+    mem_free(Lexer, l);
+    mem_free(Parser, p);
 
     return ans;
 }
 
-#endif /* EVAL_H */
+#endif

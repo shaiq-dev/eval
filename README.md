@@ -1,6 +1,6 @@
 ## Fast and efficient math expression evalvator in C
 
-It's a simple `eval()` functions that can evaluate mathematical expressions really fast. 
+A simple `eval()` that can parse and evaluate mathematical expressions really fast. 
 
 ### Usage
 ```c
@@ -20,12 +20,12 @@ main(int argc, char *argv[])
     ans = eval("3+(5*2)");              // 13
 
     // Erros
-    ans = eval("2/0");                  // ZeroDivisionError: division by zero
+    ans = eval("2/0");                  // eval: division by zero
     
     ans = eval("1+2/(3 * a)")
     //  "1+2/(3 * a)"
     //            ^
-    // SyntaxError: unsupported operand           
+    // eval: unsupported operand           
 }
 
 ```
