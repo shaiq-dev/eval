@@ -1,430 +1,407 @@
+/* eval.h - a small, allocation free math expression evaluator.
+
+ Grammar:
+    expr   := term  (('+' | '-') term)*
+    term   := unary (('*' | '/') unary)*         implicit '*' before '('
+    unary  := ('+' | '-') unary | power
+    power  := atom ('^' unary)*                  right associative
+    atom   := number | '(' expr ')'
+    number := digit+ ('.' digit*)?               no exponent, no leading '.'
+ */
 #ifndef EVAL_H
 #define EVAL_H
 
 #include <math.h>
-#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <stdlib.h> /* strtod */
 
-/**
- * If `new_size` is zero or less, the memory pointed to by `ptr` is freed.
- * Otherwise, `realloc` is used to resize the memory block.
- */
-static inline void *
-__mem(void *pt, size_t size, size_t new_size)
+/* recursion limit, a precaution against deeply nested input */
+#ifndef EVAL_MAX_DEPTH
+#define EVAL_MAX_DEPTH 128
+#endif
+
+typedef enum {
+  EVAL_OK = 0,
+  EVAL_ERR_UNEXPECTED_CHAR,  /* stray byte, not part of the grammar */
+  EVAL_ERR_UNEXPECTED_TOKEN, /* an operator or ')' where a number was due */
+  EVAL_ERR_UNEXPECTED_END,   /* input ended mid expression */
+  EVAL_ERR_UNCLOSED_PAREN,
+  EVAL_ERR_TRAILING_INPUT, /* complete expression followed by garbage */
+  EVAL_ERR_BAD_NUMBER,     /* numeric literal strtod() could not represent */
+  EVAL_ERR_DIV_ZERO,
+  EVAL_ERR_DOMAIN, /* '^' outside its domain, e.g. (-8)^0.5 */
+  EVAL_ERR_TOO_DEEP
+} eval_status;
+
+typedef struct {
+  eval_status status;
+  size_t pos; /* byte offset into the expression */
+} eval_error;
+
+static inline const char *eval_strerror(eval_status status)
 {
-    if (new_size <= 0)
-    {
-        free(pt);
-        return (void *)0;
-    }
-
-    void *m = realloc(pt, new_size);
-
-    if (m == (void *)0) exit(1);
-
-    return m;
+  switch(status) {
+  case EVAL_OK:
+    return "ok";
+  case EVAL_ERR_UNEXPECTED_CHAR:
+    return "unsupported character";
+  case EVAL_ERR_UNEXPECTED_TOKEN:
+    return "expected a value";
+  case EVAL_ERR_UNEXPECTED_END:
+    return "unexpected end of expression";
+  case EVAL_ERR_UNCLOSED_PAREN:
+    return "missing closing parenthesis";
+  case EVAL_ERR_TRAILING_INPUT:
+    return "unexpected trailing input";
+  case EVAL_ERR_BAD_NUMBER:
+    return "malformed number";
+  case EVAL_ERR_DIV_ZERO:
+    return "division by zero";
+  case EVAL_ERR_DOMAIN:
+    return "result is not a real number";
+  case EVAL_ERR_TOO_DEEP:
+    return "expression nested too deeply";
+  }
+  return "unknown error";
 }
 
-#define mem_alloc(T, c) (T *)__mem((void *)0, 0, c * sizeof(T))
-#define mem_free(T, pt) (T *)__mem((pt), sizeof(T), 0)
+/* Keep EVAL_T_BAD last, the precedence table is sized from it. */
+typedef enum {
+  EVAL_T_END = 0,
+  EVAL_T_NUMBER,
+  EVAL_T_PLUS,
+  EVAL_T_MINUS,
+  EVAL_T_STAR,
+  EVAL_T_SLASH,
+  EVAL_T_CARET,
+  EVAL_T_LPAREN,
+  EVAL_T_RPAREN,
+  EVAL_T_BAD,
+} eval_token;
 
-#define die(...)                                                               \
-    {                                                                          \
-        fprintf(stderr, __VA_ARGS__);                                          \
-        exit(1);                                                               \
-    }
-
-/**
- * Token types for lexical analysis
- */
-typedef enum
-{
-    TK_ERROR,       // Invalid or unrecognized token
-    TK_EOF,         // End of input
-    TK_NUMBER,      // Numeric literal
-    TK_PLUS,        // '+' operator
-    TK_MINUS,       // '-' operator
-    TK_STAR,        // '*' operator
-    TK_SLASH,       // '/' operator
-    TK_CARET,       // '^' operator (exponentiation)
-    TK_LEFT_PAREN,  //'(' left parenthesis
-    TK_RIGHT_PAREN, // ')' right parenthesis
-} TokenType;
-
-typedef struct __token
-{
-    TokenType type;
-    char *value;
-    unsigned int len;
-} Token;
-
-typedef struct __lexer
-{
-    char *start;
-    char *cur;
-    unsigned int pos;
-} Lexer;
-
-#define lex_peek() *lex->cur                  // Peek the current character
-#define lex_advn() (lex->cur++, lex->cur[-1]) // Advance to the next character
-#define lex_peek() *lex->cur                  // Check for whitespace
-
-#define _is_digit(c) (c >= '0' && c <= '9')
-#define _is_space(c) (c == ' ' || c == '\r' || c == '\n' || c == '\t')
-
-static inline Token
-lex_make_token(Lexer *lex, TokenType type)
-{
-    if (type == TK_NUMBER)
-    {
-        while (_is_digit(lex_peek()))
-        {
-            lex_advn();
-        }
-
-        // Handle floating point numbers
-        if (lex_peek() == '.')
-        {
-            lex_advn();
-
-            while (_is_digit(lex_peek()))
-            {
-                lex_advn();
-            }
-        }
-    }
-
-    // Update position
-    unsigned int len = (unsigned int)(lex->cur - lex->start);
-    lex->pos += len;
-
-    return (Token){
-        .type  = type,
-        .value = (char *)lex->start,
-        .len   = len,
-    };
-}
-
-static inline Token
-lex_next_token(Lexer *lex)
-{
-    // Skip whitespaces
-    while (_is_space(lex_peek()))
-    {
-        lex_advn();
-    }
-
-    lex->start = lex->cur;
-
-    if (*lex->cur == '\0')
-    {
-        return lex_make_token(lex, TK_EOF);
-    }
-
-    char c = lex_advn();
-
-    if (_is_digit(c))
-    {
-        return lex_make_token(lex, TK_NUMBER);
-    }
-
-    switch (c)
-    {
-    case '(':
-        return lex_make_token(lex, TK_LEFT_PAREN);
-    case ')':
-        return lex_make_token(lex, TK_RIGHT_PAREN);
-    case '+':
-        return lex_make_token(lex, TK_PLUS);
-    case '-':
-        return lex_make_token(lex, TK_MINUS);
-    case '*':
-        return lex_make_token(lex, TK_STAR);
-    case '/':
-        return lex_make_token(lex, TK_SLASH);
-    case '^':
-        return lex_make_token(lex, TK_CARET);
-    }
-
-    // Unrecognized character
-    return lex_make_token(lex, TK_ERROR);
-}
-
-typedef enum
-{
-    ND_ERROR,
-    ND_NUMBER,
-    ND_POSITIVE,
-    ND_NEGATIVE,
-    ND_ADD,
-    ND_SUB,
-    ND_MUL,
-    ND_DIV,
-    ND_POW
-} NodeType;
-
-/**
- * Precedence levels for different operators.
- */
-typedef enum
-{
-    PREC_MIN,  // Lowest precedence (used for initial parsing)
-    PREC_TERM, // Precedence for '+' and '-'
-    PREC_MUL,  // Precedence for '*'
-    PREC_DIV,  // Precedence for '/'
-    PREC_POW,  // Precedence for '^'
-} Precedence;
-
-// Operator precedence table
-static Precedence precedence[] = {
-    [TK_PLUS] = PREC_TERM, [TK_MINUS] = PREC_TERM, [TK_STAR] = PREC_MUL,
-    [TK_SLASH] = PREC_DIV, [TK_CARET] = PREC_POW,
+enum {
+  EVAL_PREC_NONE = 0,
+  EVAL_PREC_TERM = 1,  /* + - */
+  EVAL_PREC_MUL = 2,   /* * / and the implied one in 2(3) */
+  EVAL_PREC_UNARY = 3, /* prefix + - */
+  EVAL_PREC_POW = 4    /* ^ */
 };
 
-/**
- * Represents a node in the abstract syntax tree (AST). Each node can be a
- * number, a unary operation (positive/negative), or a binary operation
- * (addition, subtraction, etc.).
- */
-typedef struct __expression_node
+/* binary precedence per token. zero means the token is not a binary
+   operator, which ends the operator loop. */
+static const unsigned char eval_prec[EVAL_T_BAD + 1] = {
+  [EVAL_T_PLUS] = EVAL_PREC_TERM, [EVAL_T_MINUS] = EVAL_PREC_TERM,
+  [EVAL_T_STAR] = EVAL_PREC_MUL,  [EVAL_T_SLASH] = EVAL_PREC_MUL,
+  [EVAL_T_CARET] = EVAL_PREC_POW,
+};
+
+typedef struct {
+  const char *begin; /* start of the expression, err_pos is relative to it */
+  const char *cur;   /* next character to read */
+  const char *tok;   /* first character of the current token */
+  eval_token type;
+  double num; /* set when type is EVAL_T_NUMBER */
+  int depth;
+  eval_status err; /* first error seen, or EVAL_OK */
+  size_t err_pos;
+} eval_parser;
+
+static inline bool eval_is_digit(char c)
 {
-    NodeType type;
-
-    union
-    {
-        double number;
-
-        struct
-        {
-            struct __expression_node *operand;
-        } unary;
-
-        struct
-        {
-            struct __expression_node *left;
-            struct __expression_node *right;
-        } binary;
-    };
-} ExpressionNode;
-
-typedef struct __parser
-{
-    Token cur;
-    Lexer *lex;
-    char *expr;
-} Parser;
-
-static inline ExpressionNode *parser_parse_expr(Parser *p,
-                                                Precedence curr_operator_prec);
-
-static inline void
-parser_check_error(Parser *p)
-{
-    if (p->cur.type == TK_ERROR)
-        die("\t\"%s\"\n\t%*c\neval: unsupported operand\n", p->expr,
-            p->lex->pos + 1, '^');
+  return c >= '0' && c <= '9';
 }
 
-#define parser_advn() (p->cur = lex_next_token(p->lex), parser_check_error(p))
-
-static inline ExpressionNode *
-parser_parse_number(Parser *p)
+static inline bool eval_is_space(char c)
 {
-    double value = strtod(p->cur.value, NULL);
-    parser_advn();
-
-    ExpressionNode *ret = mem_alloc(struct __expression_node, 1);
-    ret->type           = ND_NUMBER;
-    ret->number         = value;
-
-    return ret;
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\v' ||
+         c == '\f';
 }
 
-/**
- * Parses prefix expressions (numbers, parentheses, unary operators).
- * Handles numbers, expressions within parentheses, and unary plus/minus.
- * Also handles implicit multiplication (e.g., `2(3)` as `2 * 3`).
- */
-static inline ExpressionNode *
-parser_parse_prefix_expr(Parser *p)
+static inline void eval_fail(eval_parser *p, eval_status status,
+                             const char *at)
 {
-    ExpressionNode *ret = NULL;
+  if(p->err == EVAL_OK) {
+    p->err = status;
+    p->err_pos = (size_t)(at - p->begin);
+  }
+}
 
-    switch (p->cur.type)
-    {
-    case TK_NUMBER:
-        ret = parser_parse_number(p);
-        break;
+/* 10^15 - 1 is below 2^53, so accumulating v * 10 + digit stays exact for
+   up to this many digits */
+#define EVAL_EXACT_DIGITS 15
 
-    case TK_LEFT_PAREN:
-    {
-        parser_advn();
-        ret = parser_parse_expr(p, PREC_MIN);
-        if (p->cur.type == TK_RIGHT_PAREN) parser_advn();
+static inline void eval_lex_number(eval_parser *p, const char *s)
+{
+  const char *d = s;
+  double whole = 0.0;
+
+  while(eval_is_digit(*d) && d - s < EVAL_EXACT_DIGITS) {
+    whole = whole * 10.0 + (double)(*d - '0');
+    d++;
+  }
+
+  if(!eval_is_digit(*d) && *d != '.') {
+    p->num = whole;
+    p->type = EVAL_T_NUMBER;
+    p->cur = d;
+    return;
+  }
+
+  const char *end = s;
+  while(eval_is_digit(*end))
+    end++;
+  if(*end == '.') {
+    end++;
+    while(eval_is_digit(*end))
+      end++;
+  }
+
+  char *stop;
+  double value = strtod(s, &stop);
+
+  if(stop > end) {
+    /* strtod consumed more than the grammar allows so the extra character at
+        'end' is the real problem. 'e' in "1e5", 'x' in "0x10". */
+    eval_fail(p, EVAL_ERR_UNEXPECTED_CHAR, end);
+    p->type = EVAL_T_BAD;
+    return;
+  }
+  if(stop < end || !isfinite(value)) {
+    /* Locale mismatch, or a literal too large to represent. */
+    eval_fail(p, EVAL_ERR_BAD_NUMBER, s);
+    p->type = EVAL_T_BAD;
+    return;
+  }
+
+  p->num = value;
+  p->type = EVAL_T_NUMBER;
+  p->cur = end;
+}
+
+static inline void eval_next(eval_parser *p)
+{
+  const char *s = p->cur;
+  while(eval_is_space(*s))
+    s++;
+
+  p->tok = s;
+
+  if(eval_is_digit(*s)) {
+    eval_lex_number(p, s);
+    return;
+  }
+
+  p->cur = s + 1;
+
+  switch(*s) {
+  case '\0':
+    p->cur = s; /* never step past the terminator */
+    p->type = EVAL_T_END;
+    return;
+  case '+':
+    p->type = EVAL_T_PLUS;
+    return;
+  case '-':
+    p->type = EVAL_T_MINUS;
+    return;
+  case '*':
+    p->type = EVAL_T_STAR;
+    return;
+  case '/':
+    p->type = EVAL_T_SLASH;
+    return;
+  case '^':
+    p->type = EVAL_T_CARET;
+    return;
+  case '(':
+    p->type = EVAL_T_LPAREN;
+    return;
+  case ')':
+    p->type = EVAL_T_RPAREN;
+    return;
+  }
+
+  eval_fail(p, EVAL_ERR_UNEXPECTED_CHAR, s);
+  p->type = EVAL_T_BAD;
+}
+
+static inline double eval_parse(eval_parser *p, unsigned min_prec);
+
+static inline double eval_apply(eval_parser *p, eval_token op,
+                                const char *op_pos, double a, double b)
+{
+  switch(op) {
+  case EVAL_T_PLUS:
+    return a + b;
+  case EVAL_T_MINUS:
+    return a - b;
+  case EVAL_T_STAR:
+    return a * b;
+
+  case EVAL_T_SLASH:
+    if(b == 0.0) {
+      eval_fail(p, EVAL_ERR_DIV_ZERO, op_pos);
+      return 0.0;
+    }
+    return a / b;
+
+  case EVAL_T_CARET: {
+    double r = pow(a, b);
+    /* pow() only returns NaN from non NaN input on a domain error, like a
+       negative base with a fractional exponent. overflow to infinity is
+       not an error here */
+    if(isnan(r) && !isnan(a) && !isnan(b)) {
+      eval_fail(p, EVAL_ERR_DOMAIN, op_pos);
+      return 0.0;
+    }
+    return r;
+  }
+
+  case EVAL_T_END:
+  case EVAL_T_NUMBER:
+  case EVAL_T_LPAREN:
+  case EVAL_T_RPAREN:
+  case EVAL_T_BAD:
+    break; /* not reachable, the caller checked precedence first */
+  }
+  return 0.0;
+}
+
+/* Parses a number, a parenthesized expression or a prefix sign.
+
+ A prefix sign parses its operand at EVAL_PREC_UNARY, which is below '^',
+ so -2^2 becomes -(2^2) and not (-2)^2.
+ */
+static inline double eval_parse_value(eval_parser *p)
+{
+  if(p->err != EVAL_OK)
+    return 0.0;
+
+  if(p->depth >= EVAL_MAX_DEPTH) {
+    eval_fail(p, EVAL_ERR_TOO_DEEP, p->tok);
+    return 0.0;
+  }
+  p->depth++;
+
+  double v = 0.0;
+
+  switch(p->type) {
+  case EVAL_T_NUMBER:
+    v = p->num;
+    eval_next(p);
+    break;
+
+  case EVAL_T_LPAREN:
+    eval_next(p);
+    v = eval_parse(p, EVAL_PREC_TERM);
+    if(p->err == EVAL_OK) {
+      if(p->type == EVAL_T_RPAREN)
+        eval_next(p);
+      else
+        eval_fail(p, EVAL_ERR_UNCLOSED_PAREN, p->tok);
     }
     break;
 
-    case TK_PLUS:
-    {
-        parser_advn();
-        ret                = mem_alloc(ExpressionNode, 1);
-        ret->type          = ND_POSITIVE;
-        ret->unary.operand = parser_parse_prefix_expr(p);
-    }
+  case EVAL_T_PLUS:
+    eval_next(p);
+    v = eval_parse(p, EVAL_PREC_UNARY);
     break;
 
-    case TK_MINUS:
-    {
-        parser_advn();
-        ret                = mem_alloc(ExpressionNode, 1);
-        ret->type          = ND_NEGATIVE;
-        ret->unary.operand = parser_parse_prefix_expr(p);
-    }
+  case EVAL_T_MINUS:
+    eval_next(p);
+    v = -eval_parse(p, EVAL_PREC_UNARY);
     break;
-    }
 
-    if (!ret)
-    {
-        ret       = mem_alloc(ExpressionNode, 1);
-        ret->type = ND_ERROR;
-    }
+  case EVAL_T_END:
+    eval_fail(p, EVAL_ERR_UNEXPECTED_END, p->tok);
+    break;
 
-    // Handle implicit multiplication (e.g., `2(3)` or `(2)(3)`)
-    if (p->cur.type == TK_NUMBER || p->cur.type == TK_LEFT_PAREN)
-    {
-        ExpressionNode *new_ret = mem_alloc(ExpressionNode, 1);
-        new_ret->type           = ND_MUL;
-        new_ret->binary.left    = ret;
-        new_ret->binary.right   = parser_parse_expr(p, PREC_DIV);
-        ret                     = new_ret;
-    }
+  case EVAL_T_BAD:
+    break;
 
-    return ret;
+  case EVAL_T_STAR:
+  case EVAL_T_SLASH:
+  case EVAL_T_CARET:
+  case EVAL_T_RPAREN:
+    eval_fail(p, EVAL_ERR_UNEXPECTED_TOKEN, p->tok);
+    break;
+  }
+
+  p->depth--;
+  return v;
 }
 
-/**
- * Parses infix expressions based on the operator.
- * Creates a binary operation node and recursively parses the right-hand side
- * expression with the appropriate precedence.
+/* Parses and folds every operator whose precedence is at least min_prec. */
+static inline double eval_parse(eval_parser *p, unsigned min_prec)
+{
+  double left = eval_parse_value(p);
+
+  while(p->err == EVAL_OK) {
+    eval_token op = p->type;
+    const char *pos = p->tok;
+    bool implicit = (op == EVAL_T_LPAREN); /* 2(3) is 2*(3) */
+    unsigned prec = implicit ? EVAL_PREC_MUL : eval_prec[op];
+
+    if(prec < min_prec)
+      break;
+
+    /* passing prec rather than prec + 1 lets another '^' bind on the right,
+        which is what makes it right associative. the rest are left */
+    unsigned next_min = (op == EVAL_T_CARET) ? prec : prec + 1;
+
+    if(!implicit)
+      eval_next(p);
+
+    double right = eval_parse(p, next_min);
+    if(p->err != EVAL_OK)
+      break;
+
+    left = eval_apply(p, implicit ? EVAL_T_STAR : op, pos, left, right);
+  }
+
+  return left;
+}
+
+/* eval()
+
+ Evaluates 'expr' and stores the result in 'out'. Returns EVAL_OK, or the
+ reason it failed.
+
+ Both 'out' and 'err' can be NULL. A NULL 'out' still evaluates, it just
+ throws the result away.
  */
-static inline ExpressionNode *
-parser_parse_infix_expr(Parser *p, Token op, ExpressionNode *left)
+static inline eval_status eval(const char *expr, double *out, eval_error *err)
 {
-    ExpressionNode *ret = mem_alloc(ExpressionNode, 1);
+  eval_parser p;
+  p.begin = expr;
+  p.cur = expr;
+  p.tok = expr;
+  p.type = EVAL_T_END;
+  p.num = 0.0;
+  p.depth = 0;
+  p.err = EVAL_OK;
+  p.err_pos = 0;
 
-    switch (op.type)
-    {
-    case TK_PLUS:
-        ret->type = ND_ADD;
-        break;
-    case TK_MINUS:
-        ret->type = ND_SUB;
-        break;
-    case TK_STAR:
-        ret->type = ND_MUL;
-        break;
-    case TK_SLASH:
-        ret->type = ND_DIV;
-        break;
-    case TK_CARET:
-        ret->type = ND_POW;
-        break;
-    }
+  if(expr == NULL) {
+    p.err = EVAL_ERR_UNEXPECTED_END;
+  }
+  else {
+    eval_next(&p);
+    double value = eval_parse(&p, EVAL_PREC_TERM);
 
-    ret->binary.left  = left;
-    ret->binary.right = parser_parse_expr(p, precedence[op.type]);
-    return ret;
+    if(p.err == EVAL_OK && p.type != EVAL_T_END)
+      eval_fail(&p, EVAL_ERR_TRAILING_INPUT, p.tok);
+
+    if(p.err == EVAL_OK && out != NULL)
+      *out = value;
+  }
+
+  if(err != NULL) {
+    err->status = p.err;
+    err->pos = p.err_pos;
+  }
+  return p.err;
 }
 
-/**
- * Parses an expression based on operator precedence.
- * Implements a recursive descent parser with operator precedence handling.
- */
-static inline ExpressionNode *
-parser_parse_expr(Parser *p, Precedence curr_operator_prec)
-{
-    ExpressionNode *left          = parser_parse_prefix_expr(p);
-    Token next_operator           = p->cur;
-    Precedence next_operator_prec = precedence[p->cur.type];
-
-    // Continue parsing while the next operator has higher precedence
-    while (next_operator_prec != PREC_MIN)
-    {
-
-        if (curr_operator_prec >= next_operator_prec) break;
-
-        parser_advn();
-        left               = parser_parse_infix_expr(p, next_operator, left);
-        next_operator      = p->cur;
-        next_operator_prec = precedence[p->cur.type];
-    }
-
-    return left;
-}
-
-static inline double
-__eval(ExpressionNode *expr)
-{
-    switch (expr->type)
-    {
-    case ND_NUMBER:
-        return expr->number;
-    case ND_POSITIVE:
-        return +__eval(expr->unary.operand);
-    case ND_NEGATIVE:
-        return -__eval(expr->unary.operand);
-    case ND_ADD:
-        return __eval(expr->binary.left) + __eval(expr->binary.right);
-    case ND_SUB:
-        return __eval(expr->binary.left) - __eval(expr->binary.right);
-    case ND_MUL:
-        return __eval(expr->binary.left) * __eval(expr->binary.right);
-    case ND_DIV:
-    {
-        double nr = __eval(expr->binary.left);
-        double dr = __eval(expr->binary.right);
-
-        if (fabs(dr) < 10e-7) die("eval: division by zero\n");
-
-        return nr / dr;
-    }
-
-    case ND_POW:
-        return pow(__eval(expr->binary.left), __eval(expr->binary.right));
-    }
-
-    return 0;
-}
-
-double
-eval(char *expr)
-{
-
-    Lexer *l = mem_alloc(Lexer, 1);
-    l->start = expr;
-    l->cur   = expr;
-    l->pos   = 0;
-
-    Parser *p = mem_alloc(Parser, 1);
-    p->expr   = expr;
-    p->cur    = (Token){0};
-    p->lex    = l;
-
-    // Get the first token
-    parser_advn();
-
-    ExpressionNode *expr_tree = parser_parse_expr(p, PREC_MIN);
-    double ans                = __eval(expr_tree);
-
-    // Free Memory
-    mem_free(Lexer, l);
-    mem_free(Parser, p);
-
-    return ans;
-}
-
-#endif
+#endif /* EVAL_H */
