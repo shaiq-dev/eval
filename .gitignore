@@ -24,3 +24,8 @@
 *.su
 *.idb
 *.pdb
+
+# Build artifacts
+eval
+suite-opt
+suite-sanitize
