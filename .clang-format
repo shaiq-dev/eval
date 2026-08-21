@@ -1,26 +1,41 @@
 BasedOnStyle: LLVM
-IndentWidth: 4
+IndentWidth: 2
+ContinuationIndentWidth: 2
 UseTab: Never
-TabWidth: 4
-BreakBeforeBraces: Allman
-AllowShortIfStatementsOnASingleLine: true
-AllowShortLoopsOnASingleLine: true
-AllowShortFunctionsOnASingleLine: false
-AlignTrailingComments: true
-AlignConsecutiveAssignments: true
-AlwaysBreakAfterDefinitionReturnType: true
-PointerBindsToType: false
-SpaceBeforeParens: ControlStatements
+ColumnLimit: 79
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: Never
+  AfterEnum: false
+  AfterStruct: false
+  AfterUnion: false
+  BeforeElse: true
+  BeforeWhile: false
+
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AllowShortCaseLabelsOnASingleLine: false
+
+SpaceBeforeParens: Never
 SpaceBeforeAssignmentOperators: true
-SpaceAfterControlStatementKeyword: false
-SpaceBeforeRangeBasedForLoopColon: true
-DerivePointerAlignment: false
-SpacesInAngles: true
 SpacesInParentheses: false
-SpacesInContainerLiterals: true
 SpacesInSquareBrackets: false
 SpacesInCStyleCastParentheses: false
-MaxEmptyLinesToKeep: 1
+SpacesInAngles: Never
+
+PointerAlignment: Right
+DerivePointerAlignment: false
+
 IndentCaseLabels: false
 IndentWrappedFunctionNames: false
-BreakAfterJavaFieldAnnotations: true
+IndentPPDirectives: None
+AlignAfterOpenBracket: Align
+AlignTrailingComments: true
+AlignConsecutiveAssignments: None
+MaxEmptyLinesToKeep: 1
+KeepEmptyLinesAtTheStartOfBlocks: false
+SortIncludes: false
+ReflowComments: false
